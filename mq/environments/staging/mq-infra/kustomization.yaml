@@ -1,0 +1,12 @@
+resources:
+ - ../../base/mq-infra
+ - configmap/configmap.yaml
+ # - configmap-security/configmap.yaml
+ # - mq-infra/hooks/post-sync-job.yaml
+ #- certificates/staging-mq-client-certificate.yaml
+ #- certificates/staging-mq-server-certificate.yaml
+ #- secrets/mq-client-jks-password-secret.yaml
+ - roles/cphtestp-clusterrole.yaml
+ - roles/cphtestp-sa-rolebinding.yaml
+patchesStrategicMerge:
+ - mq-infra/qm-template.yaml

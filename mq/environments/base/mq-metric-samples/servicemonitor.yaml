@@ -1,0 +1,19 @@
+---
+# Source: mq-metric-samples/templates/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mq-metric-samples
+  labels:
+    app.kubernetes.io/name: mq-metric-samples
+    app.kubernetes.io/instance: mq-metric-samples
+spec:
+  endpoints:
+    - bearerTokenSecret:
+        key: ''
+      port: metrics
+      scheme: http
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mq-metric-samples
+      app.kubernetes.io/instance: mq-metric-samples

@@ -1,0 +1,45 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: ace-integration-server
+spec:
+  serviceAccountName: pipeline
+  triggers:
+    - name: ace-integration-server
+      interceptors:
+        - name: "Validate GitHub payload"
+          ref:
+            name: github
+          params:
+            - name: secretRef
+              value:
+                secretName: gitops-webhook-token
+                secretKey: webhook-token
+        - name: "CEL filter: only when coming from master branch"
+          ref:
+            name: cel
+          params:
+            - name: filter
+              value: body.ref == 'refs/heads/master'
+      bindings:
+        - ref: ace-integration-server
+      template:
+        ref: ace-integration-server
+  resources:
+    kubernetesResource:
+      spec:
+        template:
+          spec:
+            serviceAccountName: pipeline
+            containers:
+              - env:
+                - name: TLS_CERT
+                  valueFrom:
+                    secretKeyRef:
+                      name: prod-ref-devops-tls-key-pair
+                      key: tls.crt
+                - name: TLS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: prod-ref-devops-tls-key-pair
+                      key: tls.key

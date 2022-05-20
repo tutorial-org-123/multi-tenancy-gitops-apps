@@ -1,0 +1,143 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: ace-build-bar-promote-dev
+
+spec:
+  params:
+
+  - name: ace-base-image
+    type: string
+    default: cp.icr.io/cp/appc/ace-server-prod:12.0.1.0-r3-20210722-112920
+
+  - name: is-source-repo-url
+    type: string
+    default: https://github.com/cloud-native-toolkit-demos/ace-customer-details.git
+  - default: ""
+    name: is-source-revision
+    type: string
+  - default: is-source
+    name: is-source-directory
+    type: string
+  - name: is-source-repo-private-key
+    type: string
+    default: '""'
+
+  - default: Dockerfile
+    name: dockerfile-relative-path-to-src
+    type: string
+
+  - name: git-ops-repo-url
+    type: string
+    default: https://github.com/cloud-native-toolkit-demos/multi-tenancy-gitops-apps.git
+  - name: git-ops-repo-private-key
+    type: string
+    default: '""'
+  - name: git-ops-parent-directory-relative-to-workspace
+    type: string
+    default: integration_server
+
+  - name: git-ops-destination-directory
+    type: string
+    default: ace/environments/dev/integrationServer
+  - name: git-ops-kustomization-path
+    type: string
+    default: ace/environments/dev/kustomization.yaml
+
+  - description: Points to the dev
+    name: destination-env
+    type: string
+    default: dev
+
+
+  tasks:
+
+  - name: clone-is-source
+    params:
+    - name: url
+      value: $(params.is-source-repo-url)
+    - name: revision
+      value: $(params.is-source-revision)
+    - name: subdirectory
+      value: $(params.is-source-directory)
+    - name: deleteExisting
+      value: "true"
+    - name: sshPrivateKey
+      value: $(params.is-source-repo-private-key)
+    taskRef:
+      kind: Task
+      name: git-clone
+    workspaces:
+    - name: output
+      workspace: shared-workspace
+
+
+  - name: resolve-props
+    params:
+    - name: is-source-directory
+      value: $(params.is-source-directory)
+    runAfter:
+    - clone-is-source
+    taskRef:
+      kind: Task
+      name: resolve-props
+    workspaces:
+    - name: input
+      workspace: shared-workspace
+
+  - name: generate-bar
+    params:
+    - name: is-source-directory
+      value: $(params.is-source-directory)
+    - name: is-application-names
+      value: $(tasks.resolve-props.results.is-application-names)
+    - name: bar-location
+      value: $(workspaces.workspace.path)/bars
+    - name: bar-filename
+      value: $(tasks.resolve-props.results.release-name).bar
+    runAfter:
+    - resolve-props
+    taskRef:
+      kind: Task
+      name: generate-bar
+    workspaces:
+    - name: workspace
+      workspace: shared-workspace
+
+  - name: build-is-image
+    params:
+    - name: BUILD_EXTRA_ARGS
+      value: --build-arg BASE=$(params.ace-base-image)
+    - name: TLSVERIFY
+      value: "false"
+    - name: IMAGE
+      value: $(tasks.resolve-props.results.registry-host)/$(context.pipelineRun.namespace)/$(tasks.resolve-props.results.release-name):$(tasks.clone-is-source.results.commit)
+    - name: DOCKERFILE
+      value: $(workspaces.source.path)/$(params.is-source-directory)/$(params.dockerfile-relative-path-to-src)
+    - name: CONTEXT
+      value: $(workspaces.source.path)/bars
+    runAfter:
+    - generate-bar
+    taskRef:
+      kind: Task
+      name: buildah
+    workspaces:
+    - name: source
+      workspace: shared-workspace
+
+  - name: gitops-for-ace
+    params:
+    - name: destination-env
+      value: $(params.destination-env)
+    - name: git-pr
+      value: "false"
+    - name: destination-image
+      value: $(tasks.resolve-props.results.registry-host)/$(context.pipelineRun.namespace)/$(tasks.resolve-props.results.release-name):$(tasks.clone-is-source.results.commit)
+    runAfter:
+    - build-is-image
+    taskRef:
+      kind: Task
+      name: ibm-gitops-for-ace
+
+  workspaces:
+  - name: shared-workspace

@@ -1,0 +1,10 @@
+apiVersion: appconnect.ibm.com/v1beta1
+kind: IntegrationServer
+metadata:
+  name: ${name}
+spec:
+  replicas: ${replicas}
+  pod:
+    containers:
+      runtime:
+        image: ${image}

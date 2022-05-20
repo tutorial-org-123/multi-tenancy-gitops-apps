@@ -1,0 +1,278 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: mq-metrics-build-tag-push
+  annotations:
+    description: Executes logic to build, tag and push a container image using the intermediate sha tag to the image-url
+    app.openshift.io/description: Executes logic to build, tag and push a container image using the intermediate sha tag to the image-url
+  labels:
+    version: 1.0.0
+spec:
+  params:
+    - name: git-url
+    - name: git-revision
+      default: master
+    - name: source-dir
+      default: /source
+    - name: image-server
+      default: ""
+    - name: image-namespace
+      default: ""
+    - name: image-repository
+      default: ""
+    - name: image-tag
+      default: ""
+    - name: BUILDER_IMAGE
+      default: quay.io/buildah/stable:v1.23.1
+    - name: DOCKERFILE
+      default: ./Dockerfile
+    - name: CONTEXT
+      default: .
+    - name: TLSVERIFY
+      default: "false"
+    - name: FORMAT
+      default: "docker"
+    - name: STORAGE_DRIVER
+      description: Set buildah storage driver
+      default: overlay
+  volumes:
+    - name: varlibcontainers
+      emptyDir: {}
+    - name: source
+      emptyDir: {}
+  stepTemplate:
+    volumeMounts:
+      - name: source
+        mountPath: $(params.source-dir)
+  steps:
+    - name: git-clone
+      image: quay.io/ibmgaragecloud/alpine-git
+      env:
+        - name: GIT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: git-credentials
+              key: password
+              optional: true
+        - name: GIT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: git-credentials
+              key: username
+              optional: true
+      script: |
+        set +x
+        if [[ -n "${GIT_USERNAME}" ]] && [[ -n "${GIT_PASSWORD}" ]]; then
+            git clone "$(echo $(params.git-url) | awk -F '://' '{print $1}')://${GIT_USERNAME}:${GIT_PASSWORD}@$(echo $(params.git-url) | awk -F '://' '{print $2}')" $(params.source-dir)
+        else
+            set -x
+            git clone $(params.git-url) $(params.source-dir)
+        fi
+        set -x
+        cd $(params.source-dir)
+        git checkout $(params.git-revision)
+    - name: build
+      image: $(params.BUILDER_IMAGE)
+      workingDir: $(params.source-dir)
+      env:
+        - name: REGISTRY_USER
+          valueFrom:
+            secretKeyRef:
+              name: registry-access
+              key: REGISTRY_USER
+              optional: true
+        - name: REGISTRY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: registry-access
+              key: REGISTRY_PASSWORD
+              optional: true
+        - name: IBM_ENTITLED_REGISTRY_USER
+          valueFrom:
+            secretKeyRef:
+              name: ibm-entitled-registry-credentials
+              key: IBM_ENTITLED_REGISTRY_USER
+              optional: true
+        - name: IBM_ENTITLED_REGISTRY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ibm-entitled-registry-credentials
+              key: IBM_ENTITLED_REGISTRY_PASSWORD
+              optional: true
+      volumeMounts:
+        - mountPath: /var/lib/containers
+          name: varlibcontainers
+      securityContext:
+        privileged: true
+      script: |
+        if [[ -n "${IBM_ENTITLED_REGISTRY_USER}" ]] && [[ -n "${IBM_ENTITLED_REGISTRY_PASSWORD}" ]]; then
+          buildah login -u ${IBM_ENTITLED_REGISTRY_USER} -p ${IBM_ENTITLED_REGISTRY_PASSWORD} cp.icr.io
+          echo "buildah login -u "${IBM_ENTITLED_REGISTRY_USER}" -p "xxxxx" cp.icr.io"
+        fi
+
+        ########## START
+        # This script is based in the buildah.sh script that can be found in the 
+        # mq-metrics-samples GitHub repository (https://github.com/ibm-messaging/mq-metric-samples)
+
+        # This guide will use the prometheus agent.
+        COLL="mq_prometheus"
+
+        # Set some variables.
+        ORG="github.com/cloud-native-toolkit-demos"
+        REPO="mq-metric-samples"
+        VRMF=9.2.4.0
+        db=`echo $COLL | sed "s/mq_//g"`
+        #
+        imgName="mq-metric-$db"
+        imgNameRuntime=$imgName-runtime
+        imgNameBuild=$imgName-build
+
+        # # This is a convenient way to tidy up old images, espcially after experimenting
+        # if [ "$1" = "CLEAN" ]
+        # then
+        #   buildah list -a -n | grep ubi-working-container | awk '{print $1}' | xargs buildah rm  2>/dev/null
+        #   buildah list -a -n | grep ubi-minimal-working-container | awk '{print $1}' | xargs buildah rm  2>/dev/null
+        #   buildah list -a -n | grep $imgName | awk '{print $1}' | xargs buildah rm  2>/dev/null
+        #   buildah images -n  | grep $imgName | awk '{print $3}' | xargs buildah rmi 2>/dev/null
+        #   buildah images
+        #   buildah list
+        #   exit 0
+        # fi
+
+        ###########################################################################
+        # For normal operation, we start with a current UBI container. Unlike a
+        # Dockerfile build, the scripted builds rerun every step each time. They do not
+        # cache previous steps automatically.
+        ###########################################################################
+        buildCtr=$(buildah from registry.access.redhat.com/ubi8/ubi)
+        
+        # Install the Go package and a couple of other things. Failures here are going to be fatal
+        # so we check that we were at least able to get started
+        buildah run $buildCtr yum --disableplugin=subscription-manager -y install wget curl tar golang
+        if [ $? -ne 0 ]
+        then
+        exit 1
+        fi
+
+        # Set up the environment that's going to be needed to download the correct
+        # MQ client libraries and to strip out unneeded components from that package.
+        buildah config --env genmqpkg_incnls=1 \
+                      --env genmqpkg_incsdk=1 \
+                      --env genmqpkg_inctls=1 \
+                      --env RDURL="https://public.dhe.ibm.com/ibmdl/export/pub/software/websphere/messaging/mqdev/redist" \
+                      --env RDTAR="IBM-MQC-Redist-LinuxX64.tar.gz" \
+                      --env VRMF="$VRMF" \
+                      --env ORG="$ORG" \
+                      --env REPO="$REPO" \
+                        $buildCtr
+
+        # Get the MQ redistributable client downloaded and installed. Use the genmqpkg command
+        # to delete parts we don't need.
+        
+        buildah run $buildCtr mkdir -p /opt/go/src/$ORG/$REPO /opt/bin /opt/config /opt/mqm
+        buildah run $buildCtr /bin/bash -c 'cd /opt/mqm \
+                        && curl -LO "$RDURL/$VRMF-$RDTAR" \
+                        && tar -zxf ./*.tar.gz \
+                        && rm -f ./*.tar.gz \
+                        && bin/genmqpkg.sh -b /opt/mqm'
+
+        # Copy over the source tree
+        buildah config --workingdir /opt/go/src/$ORG/$REPO $buildCtr
+        
+        # Updated this command from the original file as it is trying to copy the whole file system and fails
+        # pwd in the pipeline is /source/ 
+        # buildah copy  -q $buildCtr `pwd`/..
+        buildah copy  -q $buildCtr `pwd`/
+
+        # The build process for the collector allows setting of some
+        # external variables, useful for debug and logging. Set them here...
+        buildStamp=`date +%Y%m%d-%H%M%S`
+        
+        # Git command is not available in this builder imaage. GitCommit taken from previous step.
+        # gitCommit=`git rev-list -1 HEAD --abbrev-commit 2>/dev/null`
+        gitCommit=`echo "$(params.git-revision)" | cut -c1-6`
+        if [ -z "$gitCommit" ]
+        then
+          gitCommit="Unknown"
+        fi
+        hw=`uname -i`
+        os=`uname -s`
+        bp="$os/$hw"
+
+        # ... and use them as part of compiling the program. We actually do this
+        # by creating a script and copying it into the container where it gets run.
+        # That helps with wildcard expansion as it refers to the container rather than
+        # the local tree.
+        tmpfile=/tmp/build.sh.$$
+        cat << EOF > $tmpfile
+        cat config.common.yaml cmd/$COLL/config.collector.yaml > /opt/config/$COLL.yaml
+        go build -mod=vendor -o /opt/bin/$COLL \
+          -ldflags "-X \"main.BuildStamp=$buildStamp\" -X \"main.BuildPlatform=$bp\" -X \"main.GitCommit=$gitCommit\"" \
+          cmd/$COLL/*.go
+        EOF
+
+        # Copy in the build command and remove it from the local machine. Then run it.
+        echo "Copying source"
+        buildah copy -q $buildCtr $tmpfile build.sh
+        rm -f $tmpfile
+        echo "Compiling program $COLL"
+        buildah run  $buildCtr /bin/bash ./build.sh
+        echo "Compilation finished"
+
+        # We now have a container image with the compiled code. Complete its generation with a 'commit'
+        echo "Comitting builder image"
+        buildah commit -q --squash --rm $buildCtr $imgNameBuild
+
+        ###########################################################################
+        # Restart the image creation from a smaller base image
+        ###########################################################################
+        runtimeCtr=$(buildah from registry.access.redhat.com/ubi8/ubi-minimal)
+
+        # Copy over the binaries that are going to be needed. Go doesn't have any
+        # separate runtime; it builds standalone programs. All we need to add is the
+        # MQ client code and the configuration file
+        echo "Copying built objects to runtime container"
+        buildah copy -q --from $imgNameBuild $runtimeCtr /opt/mqm /opt/mqm
+        buildah copy -q --from $imgNameBuild $runtimeCtr /opt/bin /opt/bin
+        buildah copy -q --from $imgNameBuild $runtimeCtr /opt/config /opt/config
+
+        buildah config --env IBMMQ_GLOBAL_CONFIGURATIONFILE=/opt/config/$COLL.yaml $runtimeCtr
+
+        # Complete the runtime container with an entrypoint
+        buildah config --entrypoint /opt/bin/$COLL $runtimeCtr
+        echo "Commiting runtime image"
+        buildah commit -q --squash --rm $runtimeCtr $imgNameRuntime
+
+        # # Now run the image. The assumption is that you have a queue manager running on this machine on port 1414.
+        # # But you can see how this run step can be modified. Using the environment variables overrides values in the
+        # # configuration file which makes it easy to have a basic common config with only container-specific overrides
+        # # provided via the env vars.
+        # # We also map the port number to something different - the Prometheus engine would be configured to connect
+        # # to 9158 even though the collector is listening on 9157 (the assigned number for MQ).
+        # # Rather than having the config file embedded in the container image, you might prefer to mount it from a real local
+        # # filesystem.
+
+        # # addr=`ip -4 addr | grep "state UP" -A2 | grep inet | tail -n1 | awk '{print $2}' | cut -f1 -d'/'`
+        # # if [ "$addr" = "" ]
+        # # then
+        # #   addr=`hostname`
+        # # fi
+
+        # # podman run \
+        # #     -e IBMMQ_GLOBAL_LOGLEVEL=DEBUG \
+        # #     -e IBMMQ_CONNECTION_CONNNAME=$addr \
+        # #     -e IBMMQ_CONNECTION_CHANNEL=SYSTEM.DEF.SVRCONN \
+        # #     -p 9158:9157 \
+        # #     $imgNameRuntime
+        ########## END
+
+        set +x
+        if [[ -n "${REGISTRY_USER}" ]] && [[ -n "${REGISTRY_PASSWORD}" ]] && [[ "$(params.image-server)" != "image-registry.openshift-image-registry.svc:5000"  ]]; then
+          buildah login -u "${REGISTRY_USER}" -p "${REGISTRY_PASSWORD}" "$(params.image-server)"
+          echo "buildah login -u "${REGISTRY_USER}" -p "xxxxx" "$(params.image-server)""
+        fi
+        set -x
+        APP_IMAGE="$(params.image-server)/$(params.image-namespace)/$(params.image-repository):$(params.image-tag)"
+        # buildah --storage-driver=$(params.STORAGE_DRIVER) push --tls-verify=$(params.TLSVERIFY) --digestfile ./image-digest $imgNameRuntime docker://$imgNameRuntime
+        buildah --storage-driver=$(params.STORAGE_DRIVER) push --tls-verify=$(params.TLSVERIFY) --digestfile ./image-digest $imgNameRuntime docker://${APP_IMAGE}
+

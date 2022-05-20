@@ -1,0 +1,31 @@
+kind: Template
+apiVersion: template.openshift.io/v1
+metadata:
+  name: prod-ref-ss
+objects:
+  - apiVersion: cert-manager.io/v1
+    kind: Certificate
+    metadata:
+     name: prod-ref-devsops
+    spec:
+     secretName: prod-ref-devops-tls-key-pair
+     isCA: true
+     issuerRef:
+       name: prod-ref-ss
+       kind: Issuer
+     commonName: appdomain.cloud
+     subject:
+      countries:
+        - UK
+      provinces:
+        - London
+      localities:
+        - London
+      organizations:
+        - IBM
+      organizationalUnits:
+        - Assets and Architecture, DevOps
+     dnsNames:
+     - "${INGRESS_WILDCARD}"
+parameters:
+  - name: INGRESS_WILDCARD

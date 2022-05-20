@@ -1,0 +1,20 @@
+---
+# Source: mq-metric-samples/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: mq-metric-samples
+  labels:
+    app.kubernetes.io/name: mq-metric-samples
+    app.kubernetes.io/instance: mq-metric-samples
+    app: mq-metric-samples
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9157
+      targetPort: 9157
+      protocol: TCP
+      name: metrics
+  selector:
+    app.kubernetes.io/name: mq-metric-samples
+    app.kubernetes.io/instance: mq-metric-samples

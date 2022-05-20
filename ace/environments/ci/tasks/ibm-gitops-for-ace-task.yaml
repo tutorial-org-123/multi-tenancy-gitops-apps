@@ -1,0 +1,214 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: ibm-gitops-for-ace
+  annotations:
+    description: Promotes an ACE Integration Server Container Image by writing or opening a PR against gitops repo
+    app.openshift.io/description: Promotes an ACE Integration Server Container Image by writing or opening a PR against gitops repo
+    app.openshift.io/vcs-uri: https://cloud-native-toolkit-demos/multi-tenancy-gitops-apps
+    app.openshift.io/vcs-ref: master
+  labels:
+    version: 0.0.0
+spec:
+  params:
+    - name: source-env
+      default: ""
+    - name: source-yaml
+      default: "integrationServer/IntegrationServerPatch.yaml"
+    - name: destination-env
+      default: ""
+    - name: destination-yaml
+      default: "integrationServer/IntegrationServerPatch.yaml"
+    - name: destination-image
+      default: ""
+    - name: git-pr
+      default: "false"
+    - name: source-dir
+      default: /source
+    - name: subdir
+      default: "ace/environments/overlays"
+    - name: parentdir
+      default: ""
+    - name: tools-image
+      default: quay.io/ibmgaragecloud/ibmcloud-dev:v2.0.4
+  volumes:
+    - name: source
+      emptyDir: {}
+  stepTemplate:
+    volumeMounts:
+      - name: source
+        mountPath: $(params.source-dir)
+  steps:
+    - name: gitops
+      image: $(params.tools-image)
+      workingDir: $(params.source-dir)
+      env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: HOME
+          value: /home/devops
+        - name: GIT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: git-credentials
+              key: username
+              optional: true
+        - name: GIT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: git-credentials
+              key: password
+              optional: true
+        - name: GIT_USERNAME_CD
+          valueFrom:
+            secretKeyRef:
+              name: gitops-cd-secret
+              key: username
+              optional: true
+        - name: GIT_PASSWORD_CD
+          valueFrom:
+            secretKeyRef:
+              name: gitops-cd-secret
+              key: password
+              optional: true
+        - name: GIT_PARENT_DIR
+          valueFrom:
+            configMapKeyRef:
+              name: gitops-repo-ace
+              key: parentdir
+              optional: true
+        - name: GIT_PARENT_DIR_SERVICES
+          valueFrom:
+            configMapKeyRef:
+              name: gitops-repo-ace
+              key: parentdir-services
+              optional: true
+        - name: GIT_PROTOCOL
+          valueFrom:
+            configMapKeyRef:
+              name: gitops-repo-ace
+              key: protocol
+              optional: true
+        - name: GIT_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: gitops-repo-ace
+              key: host
+              optional: true
+        - name: GIT_ORG
+          valueFrom:
+            configMapKeyRef:
+              name: gitops-repo-ace
+              key: org
+              optional: true
+        - name: GIT_REPO
+          valueFrom:
+            configMapKeyRef:
+              name: gitops-repo-ace
+              key: repo
+              optional: true
+        - name: GIT_BRANCH
+          valueFrom:
+            configMapKeyRef:
+              name: gitops-repo-ace
+              key: branch
+              optional: true
+      script: |
+          #!/usr/bin/env bash
+          set -ex
+
+          SUBDIR="$(params.subdir)"
+          if [[ -n "$(params.parentdir)" ]]; then
+            PARENT_DIR="$(params.parentdir)"
+          elif [[ -n "${GIT_PARENT_DIR_SERVICES}" ]] && [[ "${GIT_PARENT_DIR_SERVICES}" = "bash -c"* ]]; then
+            PARENT_DIR=$(eval $GIT_PARENT_DIR_SERVICES | tail -n 1)
+          elif [[ -n "${GIT_PARENT_DIR_SERVICES}" ]]; then
+            PARENT_DIR="${GIT_PARENT_DIR_SERVICES}"
+          elif [[ -n "${GIT_PARENT_DIR}" ]] && [[ "${GIT_PARENT_DIR}" = "bash -c"* ]]; then
+            PARENT_DIR=$(eval $GIT_PARENT_DIR | tail -n 1)
+          elif [[ -n "${GIT_PARENT_DIR}" ]]; then
+            PARENT_DIR="${GIT_PARENT_DIR}"
+          else
+            PARENT_DIR="."
+          fi
+          SUBDIR="${PARENT_DIR}/${SUBDIR}"
+          PROTOCOL="${GIT_PROTOCOL}"
+          if [[ -z "${PROTOCOL}" ]]; then
+            PROTOCOL="https"
+          fi
+
+          DEST_YAML_FILE="${SUBDIR}/$(params.destination-env)/$(params.destination-yaml)"
+          if [[ -n "$(params.destination-image)" ]]; then
+            DEST_IMAGE_URL="$(params.destination-image)"
+          else
+            SOURCE_YAML_FILE="${SUBDIR}/$(params.source-env)/$(params.source-yaml)"
+          fi
+
+          if [[ -z "${GIT_HOST}" ]] || [[ -z "${GIT_ORG}" ]] || [[ -z "${GIT_REPO}" ]]; then
+              echo "GitOps repo has not been configured with confimap gitops-repo. Skipping trigger step"
+              exit 0
+          fi
+          set +x
+          if [[ -n "${GIT_USERNAME_CD}" ]]; then
+            GIT_AUTH_USER="${GIT_USERNAME_CD}"
+            GIT_AUTH_PWD="${GIT_PASSWORD_CD}"
+          elif [[ -n "${GIT_USERNAME}" ]]; then
+            GIT_AUTH_USER="${GIT_USERNAME}"
+            GIT_AUTH_PWD="${GIT_PASSWORD}"
+          else
+            echo "Credentials for GitOps repo not set in secret gitops-cd-secret or git-credentials"
+            exit 1
+          fi
+          set -x
+
+
+          BRANCH_CMD=""
+          if [[ -n "${GIT_BRANCH}" ]]; then
+            BRANCH_CMD="-b ${GIT_BRANCH}"
+          fi
+
+          echo "git clone ${BRANCH_CMD} ${PROTOCOL}://${GIT_AUTH_USER}:xxxx@${GIT_HOST}/${GIT_ORG}/${GIT_REPO}"
+          set +x
+          GIT_URL="${PROTOCOL}://${GIT_AUTH_USER}:${GIT_AUTH_PWD}@${GIT_HOST}/${GIT_ORG}/${GIT_REPO}"
+          git clone ${BRANCH_CMD} ${GIT_URL} gitops_cd
+          set -x
+          cd gitops_cd
+          git config user.email "bot@cloudnativetoolkit.dev"
+          git config user.name "Cloud Native Toolkit Pipeline"
+
+
+          if [[ -n "${DEST_IMAGE_URL}" ]]; then
+            echo "Destination file image will be set to ${DEST_IMAGE_URL}"
+          elif [[ -f "${DEST_YAML_FILE}" ]]; then
+            echo "Destination file ${DEST_YAML_FILE} found, file will be updated with contents from ${SOURCE_YAML_FILE}"
+            cat "${DEST_YAML_FILE}"
+            DEST_IMAGE_URL="$(yq r ${SOURCE_YAML_FILE} spec.pod.containers.runtime.image)"
+          else
+            echo "Destination file ${DEST_YAML_FILE} not found"
+            exit 1
+          fi
+          yq w -i ${DEST_YAML_FILE} spec.pod.containers.runtime.image ${DEST_IMAGE_URL}
+          echo "Destination file updated with contents with image ${DEST_IMAGE_URL}"
+          cat "${DEST_YAML_FILE}"
+
+          if [[ $(git status -s | wc -l) -eq 0 ]]; then
+            echo "No changes"
+            exit 0
+          fi
+          git diff
+          git add "${SUBDIR}/"
+          git commit -m "Cloudnative toolkit commit" --signoff
+
+          if [[ "$(params.git-pr)" == "true" ]]; then
+            git_version="$(git rev-parse --short HEAD)"
+            git checkout -b cntk-ci-pipeline-${git_version}
+            git push origin cntk-ci-pipeline-${git_version}
+
+            GIT_PUSH_URL="${GIT_PROTOCOL}://api.github.com/repos/${GIT_ORG}/${GIT_REPO}/pulls"
+            curl -u ${GIT_USERNAME}:${GIT_PASSWORD} -d '{"title":"PR to promote to $(params.destination-env) environment","base":"'${GIT_BRANCH}'", "head":"'${GIT_ORG}':cntk-ci-pipeline-'${git_version}'"}' ${GIT_PUSH_URL}
+          else
+            echo "Pushing directly to repository"
+            git push -v
+          fi

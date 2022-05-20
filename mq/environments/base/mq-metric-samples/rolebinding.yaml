@@ -1,0 +1,13 @@
+---
+# Source: mq-metric-samples/templates/rolebinding.yaml
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: mq-metric-samples
+subjects:
+  - kind: ServiceAccount
+    name: mq-metric-samples
+roleRef:
+  kind: Role
+  name: mq-metric-samples
+  apiGroup: rbac.authorization.k8s.io

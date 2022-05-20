@@ -1,0 +1,42 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: ace-integration-server
+spec:
+  params:
+    - name: source-repo
+      description: name of the repository
+    - name: git-org
+      description: Login name of the origanisation
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: ace-integration-server-$(tt.params.source-repo)-
+        namespace: ci
+      spec:
+        params:
+          - name: is-source-repo-url
+            value: git@github.com:$(tt.params.git-org)/$(tt.params.source-repo).git
+          - name: is-infra-repo-url
+            value: git@github.com:$(tt.params.git-org)/ace-infra.git
+          - name: git-ops-repo-url
+            value: git@github.com:$(tt.params.git-org)/multi-tenancy-gitops-apps.git
+          - name: gitops-apps-repo-full-name
+            value: $(tt.params.git-org)/multi-tenancy-gitops-apps
+        pipelineRef:
+          name: ace-integration-server
+        serviceAccountName: pipeline
+        workspaces:
+          - name: shared-workspace
+            persistentVolumeClaim:
+              claimName: ace-integration-server
+          - name: ace-infra-repo-secret
+            secret:
+              secretName: ace-infra-at-github
+          - name: gitops-repo-secret
+            secret:
+              secretName: multi-tenancy-gitops-apps-at-github
+          - name: ace-source-repo-secret
+            secret:
+              secretName: $(tt.params.source-repo)-at-github

@@ -1,0 +1,7 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+ name: prod-ref-ss-ca
+spec:
+  ca:
+    secretName: prod-ref-ss-tls-ca-key-pair

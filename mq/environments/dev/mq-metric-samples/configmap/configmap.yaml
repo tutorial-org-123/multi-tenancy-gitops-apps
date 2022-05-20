@@ -1,0 +1,19 @@
+---
+# Source: base/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mq-metric-samples
+  labels:
+    app.kubernetes.io/instance: mq-metric-samples
+data:
+  IBMMQ_GLOBAL_USEOBJECTSTATUS: 'true'
+  IBMMQ_OBJECTS_SUBSCRIPTIONS: '!$SYS*'
+  IBMMQ_CONNECTION_CHANNEL: MONITORING_CHL
+  IBMMQ_CONNECTION_CONNNAME: qm1-ibm-mq.dev.svc.cluster.local(1414)
+  IBMMQ_OBJECTS_QUEUES: '!SYSTEM.*,!AMQ.*,*'
+  IBMMQ_GLOBAL_LOGLEVEL: INFO
+  IBMMQ_CONNECTION_QUEUEMANAGER: QM1
+  IBMMQ_OBJECTS_TOPICS: '!*'
+  IBMMQ_GLOBAL_USEPUBLICATIONS: 'false'
+  IBMMQ_GLOBAL_CONFIGURATIONFILE: ''
