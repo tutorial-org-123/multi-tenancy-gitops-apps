@@ -13,8 +13,8 @@ spec:
   project: applications
   source:
     path: apic/environments/single-cluster/config
-    repoURL: ${GIT_BASEURL}/${GIT_ORG}/${GIT_GITOPS_APPLICATIONS}
-    targetRevision: ${GIT_GITOPS_APPLICATIONS_BRANCH}
+    repoURL: https://github.com/tutorial-org-123/multi-tenancy-gitops-apps.git
+    targetRevision: master
   syncPolicy:
     automated:
       prune: true

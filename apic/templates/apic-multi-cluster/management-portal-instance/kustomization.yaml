@@ -42,10 +42,10 @@ patches:
   patch: |-
     - op: add
       path: /spec/source/repoURL
-      value: ${GIT_BASEURL}/${GIT_ORG}/${GIT_GITOPS_SERVICES}
+      value: https://github.com/tutorial-org-123/multi-tenancy-gitops-services.git
     - op: add
       path: /spec/source/targetRevision
-      value: ${GIT_GITOPS_SERVICES_BRANCH}
+      value: master
 - target:
     kind: Secret
   patch: |-

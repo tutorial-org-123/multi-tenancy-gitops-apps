@@ -20,6 +20,6 @@ spec:
       selfHeal: true
   source:
     path: cp4a/environments/cloudpak
-    repoURL: https://github.com/cloud-native-toolkit-demos/multi-tenancy-gitops-apps.git
+    repoURL: https://github.com/tutorial-org-123/multi-tenancy-gitops-apps.git
     targetRevision: master
 
