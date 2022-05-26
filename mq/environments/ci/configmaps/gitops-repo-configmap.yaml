@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: multi-tenancy-gitops
+    group: pipeline
+    type: git
+  name: gitops-repo
+data:
+  branch: master
+  host: github.com
+  org: tutorial-org-123
+  owner: tutorial-org-123
+  parentdir: .
+  protocol: https
+  repo: multi-tenancy-gitops-apps
+  url: https://github.com/tutorial-org-123/multi-tenancy-gitops-apps.git
